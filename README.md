@@ -14,39 +14,39 @@ web security or front end yet. How it was built and how to run the demonstration
 Open this repository (or `claude_modernization`) in VS Code or a terminal with Claude Code and type:
 
 ```
-Run backend-postgresql
+Run model-postgresql
 ```
 
-or, to rebuild the backend code from scratch, `Rebuild the backend.` Claude Code follows the model plan in the
+or, to rebuild the model code from scratch, `Rebuild the model.` Claude Code follows the model plan in the
 companion repository (`claude_modernization/docs/phase2/model/postgresql/CLAUDE.md`): it creates the database login and the
-local network route the backend needs, runs the backend's connection check, then the first-login password change.
+local network route the model needs, runs the model's connection check, then the first-login password change.
 The first time, VS Code may ask for permission to read the `claude_modernization` folder; allow it.
 
-The backend needs the migrated database (container `mar-postgres`). If it does not exist, open `claude_modernization`
+The model needs the migrated database (container `mar-postgres`). If it does not exist, open `claude_modernization`
 and type `Repeat iteration 5.` first. Guidance for Claude Code in this repository is in `CLAUDE.md`.
 
-**The Oracle proof of concept** has its own backend, `backend/oracle/`, on the Oracle database the migration also
-produced. Type `Run backend-oracle` to run its demonstration; it follows
+**The Oracle proof of concept** has its own model, `model/oracle/`, on the Oracle database the migration also
+produced. Type `Run model-oracle` to run its demonstration; it follows
 `claude_modernization/docs/phase2/model/oracle/CLAUDE.md` and needs the container `mar-oracle` (`Run import-oracle` in
-`claude_modernization`). It is self-contained; see [backend/oracle/README.md](backend/oracle/README.md).
+`claude_modernization`). It is self-contained; see [model/oracle/README.md](model/oracle/README.md).
 
 ## Layout
 
 ```
-backend/postgresql/   Spring Boot 4.1.1 service on PostgreSQL (Java 21, Gradle Kotlin DSL)
-backend/oracle/       the same service on Oracle AI Database 26ai Free (the Oracle proof of concept; self-contained)
+model/postgresql/   Spring Boot 4.1.1 service on PostgreSQL (Java 21, Gradle Kotlin DSL)
+model/oracle/       the same service on Oracle AI Database 26ai Free (the Oracle proof of concept; self-contained)
 frontend/             Angular app (not started)
 ```
 
 ```
-backend/postgresql/src/main/java/com/masterantique/backend/
-  BackendApplication.java   entry point
+model/postgresql/src/main/java/com/masterantique/
+  ModelApplication.java   entry point
   DatabaseCheck.java        logs what it is connected to at start-up
   model/                    JPA entities: AppUser (users), Ticket, TicketState, Comment, AuditLog
   repo/                     Spring Data repositories
   login/                    LoginService, LoginResult, IdentityCheck, RejectingIdentityCheck
   demo/                     DEMO ONLY, active with the "demo" profile: DemoIdentityCheck, FirstLoginDemo
-backend/postgresql/src/test/java/...   LoginServiceTest (unit tests, no database)
+model/postgresql/src/test/java/...   LoginServiceTest (unit tests, no database)
 ```
 
 ## The database
@@ -82,12 +82,12 @@ changes the schema. If validation fails, fix the entity, not the setting.
 Needs Java 21. The Gradle wrapper downloads Gradle itself.
 
 ```
-cd backend/postgresql
+cd model/postgresql
 ./gradlew build                      # compile and run the unit tests
 ./gradlew test                       # unit tests only
 
 read -rsp 'mar_app password: ' MAR_DB_PASSWORD; echo; export MAR_DB_PASSWORD
-./gradlew bootRun                    # or: java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
+./gradlew bootRun                    # or: java -jar build/libs/model-postgresql-0.0.1-SNAPSHOT.jar
 ```
 
 Start-up logs the connection and the data, for example:
@@ -111,7 +111,7 @@ The migration carried no passwords over: every migrated user has no password has
   stored password of the user you name, so use it only against a test copy of the database:
 
 ```
-java -jar build/libs/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
+java -jar build/libs/model-postgresql-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
   --demo.username=Customer1 --demo.password=anything \
   --demo.one-time-code=DEMO-1234 --demo.new-password=Walnut-Armoire-1887
 ```
@@ -124,7 +124,7 @@ java -jar build/libs/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
   passwords), including password changes.
 - The Angular front end in `frontend/`.
 - The database is PostgreSQL (decided 2026-09-23). Oracle, named in the original brief, is a proof of concept only
-  (`backend/oracle/`), not the application's database.
+  (`model/oracle/`), not the application's database.
 
 ## License
 
