@@ -5,11 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 Phase 2 of the MasterAntiqueRepair modernization: the legacy ASP.NET Web Forms repair-shop application rebuilt as a
-Spring Boot 4.1.1 (Java 21) backend with an Angular front end, on **PostgreSQL** (not Oracle; decided 2026-09-23).
+Spring Boot 4.1.1 (Java 21) backend with an Angular front end, on **PostgreSQL** (decided 2026-09-23). The data migration
+also produced an Oracle database as a proof of concept, and it has its own backend.
 
 - `backend/postgresql/`: the Spring Boot project (Gradle Kotlin DSL, package `com.masterantique.backend`). So far only the
   **model** layer: JPA entities for the migrated tables, repositories, and `LoginService` with the forced password
   change on first login. No controller (REST API), no Spring Security yet.
+- `backend/oracle/`: the same model layer on the migrated Oracle database (Oracle AI Database 26ai Free), the Oracle proof
+  of concept. **Self-contained:** it must build and run with every other folder removed; never copy from or refer to
+  `backend/postgresql/` when working on it (and the reverse). See `backend/oracle/README.md`.
 - `frontend/`: the Angular app, not started.
 
 ## Where the plans and the database live
@@ -19,7 +23,10 @@ Everything that planned and produced this code is in the companion repository
 
 | What | Where (in `claude_modernization`) |
 |---|---|
-| How the backend was built, how to run and rebuild it | `docs/phase2/model/MODEL_PLAN.md` |
+| How the backend was built, how to run and rebuild it | `docs/phase2/model/postgresql/MODEL_PLAN.md` |
+| How `backend/oracle/` was built, how to run and rebuild it | `docs/phase2/model/oracle/CLAUDE.md` |
+| How to connect to the Oracle database (logins, network routes, Spring Boot) | `docs/phase1/dbmigrate/import-oracle/OracleDatabaseGuide.html` |
+| The Oracle database itself: import-oracle, which builds container `mar-oracle` | `docs/phase1/dbmigrate/import-oracle/README.md`, `tools/phase1/dbmigrate/import-oracle/CLAUDE.md` |
 | How to connect to the database (logins, network routes, Spring Boot) | `docs/phase1/dbmigrate/iteration5/PostgreSQLDatabaseGuide.html` |
 | The database itself: iteration 5, which builds container `mar-postgres` | `docs/phase1/dbmigrate/iteration5/README.md`, `tools/phase1/dbmigrate/iteration5/CLAUDE.md` |
 | Project-wide guidance | `CLAUDE.md` |
@@ -27,11 +34,16 @@ Everything that planned and produced this code is in the companion repository
 ## Rules
 
 - **The prompt `Run backend-postgresql` runs the backend demonstration. When asked to run it or to rebuild the backend, first read
-  `~/dev/claude_work/claude_modernization/docs/phase2/model/MODEL_PLAN.md` and follow it** (section 2 to run the
+  `~/dev/claude_work/claude_modernization/docs/phase2/model/postgresql/MODEL_PLAN.md` and follow it** (section 2 to run the
   demonstration, section 5 to rebuild the code).
 - **The backend needs iteration 5's database** (container `mar-postgres`, database `masterantique`). If
   `docker ps -a` shows no `mar-postgres`, say so and stop: the database is built from `claude_modernization`
   ("Repeat iteration 5." in a session there), not from this repository.
+- **The prompt `Run backend-oracle` runs the Oracle backend demonstration. When asked to run it or to rebuild
+  `backend/oracle/`, first read `~/dev/claude_work/claude_modernization/docs/phase2/model/oracle/CLAUDE.md` and follow it**
+  (section 2 to run, section 5 to rebuild). It needs import-oracle's database (container `mar-oracle`); if
+  `docker ps -a` shows no `mar-oracle`, say so and stop: it is built from `claude_modernization` (`Run import-oracle`).
+  Build and test with `cd backend/oracle && ./gradlew build`.
 - **Git is read-only for Claude** (a hook enforces it): never add, commit, push, rm, mv or reset; the user commits.
 - **No secrets in source.** The database password comes only from the `MAR_DB_PASSWORD` environment variable; never
   write it into a file.

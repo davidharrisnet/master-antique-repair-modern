@@ -7,7 +7,7 @@ data-migration tooling and reports live in the companion repository `claude_mode
 **Status:** the Spring Boot back end is started. It connects to the migrated PostgreSQL database, maps its
 tables with JPA, and contains the sign-in logic for the first login of migrated users. There is no REST API,
 web security or front end yet. How it was built and how to run the demonstration:
-`claude_modernization/docs/phase2/model/MODEL_PLAN.md`.
+`claude_modernization/docs/phase2/model/postgresql/MODEL_PLAN.md`.
 
 ## Working with Claude Code
 
@@ -18,17 +18,23 @@ Run backend-postgresql
 ```
 
 or, to rebuild the backend code from scratch, `Rebuild the backend.` Claude Code follows the model plan in the
-companion repository (`claude_modernization/docs/phase2/model/MODEL_PLAN.md`): it creates the database login and the
+companion repository (`claude_modernization/docs/phase2/model/postgresql/MODEL_PLAN.md`): it creates the database login and the
 local network route the backend needs, runs the backend's connection check, then the first-login password change.
 The first time, VS Code may ask for permission to read the `claude_modernization` folder; allow it.
 
 The backend needs the migrated database (container `mar-postgres`). If it does not exist, open `claude_modernization`
 and type `Repeat iteration 5.` first. Guidance for Claude Code in this repository is in `CLAUDE.md`.
 
+**The Oracle proof of concept** has its own backend, `backend/oracle/`, on the Oracle database the migration also
+produced. Type `Run backend-oracle` to run its demonstration; it follows
+`claude_modernization/docs/phase2/model/oracle/CLAUDE.md` and needs the container `mar-oracle` (`Run import-oracle` in
+`claude_modernization`). It is self-contained; see [backend/oracle/README.md](backend/oracle/README.md).
+
 ## Layout
 
 ```
 backend/postgresql/   Spring Boot 4.1.1 service on PostgreSQL (Java 21, Gradle Kotlin DSL)
+backend/oracle/       the same service on Oracle AI Database 26ai Free (the Oracle proof of concept; self-contained)
 frontend/             Angular app (not started)
 ```
 
@@ -117,7 +123,8 @@ java -jar build/libs/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
 - Workflow audit logging with the same format as the legacy `audit_logs` (ids and timestamps, never comment text or
   passwords), including password changes.
 - The Angular front end in `frontend/`.
-- The database is PostgreSQL (decided 2026-09-23; Oracle, named in the original brief, is not pursued).
+- The database is PostgreSQL (decided 2026-09-23). Oracle, named in the original brief, is a proof of concept only
+  (`backend/oracle/`), not the application's database.
 
 ## License
 
