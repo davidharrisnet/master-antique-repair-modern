@@ -14,7 +14,7 @@ web security or front end yet. How it was built and how to run the demonstration
 Open this repository (or `claude_modernization`) in VS Code or a terminal with Claude Code and type:
 
 ```
-Run the backend demonstration.
+Run backend-postgresql
 ```
 
 or, to rebuild the backend code from scratch, `Rebuild the backend.` Claude Code follows the model plan in the
@@ -28,19 +28,19 @@ and type `Repeat iteration 5.` first. Guidance for Claude Code in this repositor
 ## Layout
 
 ```
-backend/     Spring Boot 4.1.1 service (Java 21, Gradle Kotlin DSL)
-frontend/    Angular app (not started)
+backend/postgresql/   Spring Boot 4.1.1 service on PostgreSQL (Java 21, Gradle Kotlin DSL)
+frontend/             Angular app (not started)
 ```
 
 ```
-backend/src/main/java/com/masterantique/backend/
+backend/postgresql/src/main/java/com/masterantique/backend/
   BackendApplication.java   entry point
   DatabaseCheck.java        logs what it is connected to at start-up
   model/                    JPA entities: AppUser (users), Ticket, TicketState, Comment, AuditLog
   repo/                     Spring Data repositories
   login/                    LoginService, LoginResult, IdentityCheck, RejectingIdentityCheck
   demo/                     DEMO ONLY, active with the "demo" profile: DemoIdentityCheck, FirstLoginDemo
-backend/src/test/java/...   LoginServiceTest (unit tests, no database)
+backend/postgresql/src/test/java/...   LoginServiceTest (unit tests, no database)
 ```
 
 ## The database
@@ -76,7 +76,7 @@ changes the schema. If validation fails, fix the entity, not the setting.
 Needs Java 21. The Gradle wrapper downloads Gradle itself.
 
 ```
-cd backend
+cd backend/postgresql
 ./gradlew build                      # compile and run the unit tests
 ./gradlew test                       # unit tests only
 

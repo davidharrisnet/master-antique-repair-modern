@@ -1,13 +1,13 @@
 # CLAUDE.md
 
-Guidance for Claude Code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this repository is
 
 Phase 2 of the MasterAntiqueRepair modernization: the legacy ASP.NET Web Forms repair-shop application rebuilt as a
 Spring Boot 4.1.1 (Java 21) backend with an Angular front end, on **PostgreSQL** (not Oracle; decided 2026-09-23).
 
-- `backend/`: the Spring Boot project (Gradle Kotlin DSL, package `com.masterantique.backend`). So far only the
+- `backend/postgresql/`: the Spring Boot project (Gradle Kotlin DSL, package `com.masterantique.backend`). So far only the
   **model** layer: JPA entities for the migrated tables, repositories, and `LoginService` with the forced password
   change on first login. No controller (REST API), no Spring Security yet.
 - `frontend/`: the Angular app, not started.
@@ -26,7 +26,7 @@ Everything that planned and produced this code is in the companion repository
 
 ## Rules
 
-- **When asked to run the backend demonstration or rebuild the backend, first read
+- **The prompt `Run backend-postgresql` runs the backend demonstration. When asked to run it or to rebuild the backend, first read
   `~/dev/claude_work/claude_modernization/docs/phase2/model/MODEL_PLAN.md` and follow it** (section 2 to run the
   demonstration, section 5 to rebuild the code).
 - **The backend needs iteration 5's database** (container `mar-postgres`, database `masterantique`). If
@@ -39,4 +39,51 @@ Everything that planned and produced this code is in the companion repository
   entity, never the setting or the database.
 - **The `demo` profile changes real data** (it sets a user's password). Run it only against a test copy of the
   database, as `MODEL_PLAN.md` describes.
-- Build and test with the wrapper: `cd backend && ./gradlew build` (includes the unit tests, no database needed).
+- Build and test with the wrapper: `cd backend/postgresql && ./gradlew build` (includes the unit tests, no database needed).
+
+## Commands
+
+All from `backend/postgresql/` (Java 21; the wrapper downloads Gradle):
+
+```
+./gradlew build                                         # compile + unit tests (no database)
+./gradlew test --tests '*LoginServiceTest'              # one test class
+./gradlew test --tests '*LoginServiceTest.someMethod'   # one test method
+./gradlew bootRun                                       # needs MAR_DB_PASSWORD and a route to mar-postgres
+```
+
+Connection settings are environment variables with defaults in `application.properties`: `MAR_DB_HOST` (`localhost`),
+`MAR_DB_PORT` (`5433`, the localhost proxy; `5432` for a container address or the shared Docker network),
+`MAR_DB_USER` (`mar_app`), `MAR_DB_NAME` (`masterantique`), `MAR_DB_PASSWORD` (required, no default). Read the
+password with `read -rsp`, never put it on a command line that is logged or into a file.
+
+## Architecture
+
+- **Profiles decide what runs at start-up.** Without a profile: `DatabaseCheck` (a `CommandLineRunner`) logs the
+  connection and row counts, and `RejectingIdentityCheck` makes every first-password change fail. With `demo`:
+  `FirstLoginDemo` (console walk-through, driven by `demo.*` properties) and `DemoIdentityCheck` (accepts
+  `demo.issued-code`, default `DEMO-1234`) replace them. Keep the `@Profile("!demo")` / `@Profile("demo")` pairs
+  in step; exactly one `IdentityCheck` bean must exist. Demo-only code stays in the `demo` package.
+- **`LoginService` is the only business logic.** `login` returns `LoginResult` (`OK`, `MUST_CHANGE_PASSWORD`,
+  `INVALID`, same answer for unknown user and wrong password, with a dummy bcrypt compare to equalise timing).
+  `changePassword` requires `IdentityCheck.verify`, the password policy (`checkPolicy`: 12+ chars, confirm match,
+  must not contain the username), then stores a `{bcrypt}` delegating-encoder hash and a new security stamp.
+  Errors are `IllegalArgumentException` with user-facing messages. Log ids, never passwords or comment text.
+- **Entities mirror the migrated schema exactly** (snake_case columns, explicit `@Column` names and lengths so
+  `validate` passes). Conventions: `users` holds customers, employees and managers in one `AppUser` entity with
+  `discriminator` as a plain string column (no JPA inheritance); soft delete via `deleted_at` (NULL = active);
+  `TicketState` is stored `ORDINAL` (0/1/2, so never reorder the enum); `@ManyToOne` is `LAZY`; timestamps are
+  `LocalDateTime` (columns are `TIMESTAMP` without time zone); ids are `IDENTITY`. `open-in-view` is off, so load
+  what you need inside `@Transactional` service methods.
+- **User lookup is case-insensitive** (`AppUserRepository.findActiveByName`, `lower(name)` on both sides to hit
+  the partial index `ix_users_name_active`). Keep that form for new sign-in queries.
+- Every migrated user has `password_hash` NULL and `must_reset_password` true, so all real logins currently go
+  through `MUST_CHANGE_PASSWORD`.
+- Unit tests mock `AppUserRepository` and `AppUser` with Mockito (no Spring context, no database). There are no
+  integration tests; the running app's start-up (`DatabaseCheck`) is the schema check.
+
+## Next steps (from README)
+
+REST API with server-side validation and Spring Security around `LoginService`; a real `IdentityCheck`; lockout
+(`access_failed_count`, `lockout_end_date_utc`) and rate limiting; audit logging in the legacy `audit_logs` format;
+the Angular front end in `frontend/`.
