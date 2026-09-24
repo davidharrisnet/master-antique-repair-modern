@@ -9,6 +9,22 @@ tables with JPA, and contains the sign-in logic for the first login of migrated 
 web security or front end yet. How it was built and how to run the demonstration:
 `claude_modernization/docs/phase2/model/MODEL_PLAN.md`.
 
+## Working with Claude Code
+
+Open this repository (or `claude_modernization`) in VS Code or a terminal with Claude Code and type:
+
+```
+Run the backend demonstration.
+```
+
+or, to rebuild the backend code from scratch, `Rebuild the backend.` Claude Code follows the model plan in the
+companion repository (`claude_modernization/docs/phase2/model/MODEL_PLAN.md`): it creates the database login and the
+local network route the backend needs, runs the backend's connection check, then the first-login password change.
+The first time, VS Code may ask for permission to read the `claude_modernization` folder; allow it.
+
+The backend needs the migrated database (container `mar-postgres`). If it does not exist, open `claude_modernization`
+and type `Repeat iteration 5.` first. Guidance for Claude Code in this repository is in `CLAUDE.md`.
+
 ## Layout
 
 ```
@@ -37,7 +53,7 @@ container publishes no port and has no known owner password, so before the back 
 2. a network route to the database (a container address, a shared Docker network, or a localhost-only proxy).
 
 Both are explained step by step, with every command tested, in
-`claude_modernization/docs/dbmigrate/iteration5/PostgreSQLDatabaseGuide.html`. The defaults here assume the
+`claude_modernization/docs/phase1/dbmigrate/iteration5/PostgreSQLDatabaseGuide.html`. The defaults here assume the
 localhost proxy on port 5433.
 
 ## Configuration
