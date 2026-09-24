@@ -101,7 +101,7 @@ java -jar build/libs/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
 - Workflow audit logging with the same format as the legacy `audit_logs` (ids and timestamps, never comment text or
   passwords), including password changes.
 - The Angular front end in `frontend/`.
-- Phase 2 targets Oracle; the back end currently runs on the PostgreSQL database from the migration work.
+- The database is PostgreSQL (decided 2026-09-23; Oracle, named in the original brief, is not pursued).
 
 ## License
 
