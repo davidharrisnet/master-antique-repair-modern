@@ -7,7 +7,7 @@ data-migration tooling and reports live in the companion repository `claude_mode
 **Status:** the Spring Boot back end is started. It connects to the migrated PostgreSQL database, maps its
 tables with JPA, and contains the sign-in logic for the first login of migrated users. There is no REST API,
 web security or front end yet. How it was built and how to run the demonstration:
-`claude_modernization/docs/phase2/model/postgresql/MODEL_PLAN.md`.
+`claude_modernization/docs/phase2/model/postgresql/CLAUDE.md`.
 
 ## Working with Claude Code
 
@@ -18,7 +18,7 @@ Run backend-postgresql
 ```
 
 or, to rebuild the backend code from scratch, `Rebuild the backend.` Claude Code follows the model plan in the
-companion repository (`claude_modernization/docs/phase2/model/postgresql/MODEL_PLAN.md`): it creates the database login and the
+companion repository (`claude_modernization/docs/phase2/model/postgresql/CLAUDE.md`): it creates the database login and the
 local network route the backend needs, runs the backend's connection check, then the first-login password change.
 The first time, VS Code may ask for permission to read the `claude_modernization` folder; allow it.
 

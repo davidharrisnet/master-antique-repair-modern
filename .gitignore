@@ -28,7 +28,8 @@ replay_pid*
 build/
 !**/gradle/wrapper/gradle-wrapper.jar
 
-# IDEs
+# IDEs (bin/ is the VS Code Java extension's compile output, beside Gradle's build/)
+bin/
 .idea/
 *.iml
 .vscode/
