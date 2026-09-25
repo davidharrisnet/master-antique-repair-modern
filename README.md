@@ -1,4 +1,4 @@
-# master-antique-repair-claude
+# master-antique-repair-modern
 
 Phase 2 of the MasterAntiqueRepair modernization: the legacy ASP.NET Web Forms repair-shop application
 (`master-antique-repair`) rebuilt as a Spring Boot REST API with an Angular front end. The migration planning,
