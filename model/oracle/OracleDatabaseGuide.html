@@ -132,7 +132,7 @@ footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--line);
 
 <main>
 <header class="hero">
-  <p class="eyebrow">MasterAntiqueRepair &middot; Phase 2 model layer &middot; model/oracle (proof of concept)</p>
+  <p class="eyebrow">MasterAntiqueRepair &middot; Phase 2 model layer &middot; model/oracle</p>
   <h1>The Oracle model and its database</h1>
   <p class="lede">The migrated database runs in an Oracle AI Database 26ai Free container on the Linux machine. This guide takes you from a first query in SQL*Plus to this folder's Spring Boot 4.1.1 model, which reads the database with JDBC and JPA and carries the password change every migrated user is forced to make on first login. Every code block below is a file of this model, copied into the page when it is built, and every command was run against a copy of the database. The database itself is built by the companion repository <code>claude_modernization</code> (its import-oracle tool, <code>Run import-oracle</code> there); nothing in this guide needs that repository except rebuilding the delivered container.</p>
 </header>
@@ -293,7 +293,7 @@ SELECT id, state FROM tickets WHERE id = 3;   -- back to 0</code></pre></div>
 <div class="code"><div class="code-head"><span>db/mar-roles.sql</span><button type="button">Copy</button></div><pre><code>-- mar-roles.sql: application logins for the MasterAntiqueRepair database. Run once, as SYS in the container.
 -- The passwords arrive as the substitution variables app_pw and ro_pw, defined on standard input just before this script
 -- (see model/oracle/CLAUDE.md), never written in this file. SET VERIFY OFF keeps SQL*Plus from echoing them.
--- Tested copy of claude_modernization/tools/phase1/dbmigrate/import-oracle/guide/mar-roles.sql.
+-- Tested copy of claude_modernization/tools/phase2/dbmigrate/import-oracle/guide/mar-roles.sql.
 SET VERIFY OFF
 WHENEVER SQLERROR EXIT FAILURE
 ALTER SESSION SET CONTAINER = FREEPDB1;
@@ -475,11 +475,17 @@ dependencies {
     implementation(&quot;org.springframework.boot:spring-boot-starter-data-jpa&quot;)
     // Password hashing for the first-login password change (no web security yet)
     implementation(&quot;org.springframework.security:spring-security-crypto&quot;)
+    // REST API (Spring MVC, embedded Tomcat, Jackson 3) and Bean Validation of the request bodies
+    implementation(&quot;org.springframework.boot:spring-boot-starter-webmvc&quot;)
+    implementation(&quot;org.springframework.boot:spring-boot-starter-validation&quot;)
+    // OpenAPI document and Swagger UI; the 3.x line is the one for Spring Boot 4 (3.1.1 is built on Boot 4.1.0)
+    implementation(&quot;org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1&quot;)
     // Oracle JDBC driver (thin, Java 11+); the version comes from the Spring Boot BOM
     runtimeOnly(&quot;com.oracle.database.jdbc:ojdbc11&quot;)
 
-    // Unit tests: JUnit 5, Mockito, AssertJ
+    // Unit tests: JUnit 5, Mockito, AssertJ; MockMvc for the error-mapping test of the web layer
     testImplementation(&quot;org.springframework.boot:spring-boot-starter-test&quot;)
+    testImplementation(&quot;org.springframework.boot:spring-boot-starter-webmvc-test&quot;)
     testRuntimeOnly(&quot;org.junit.platform:junit-platform-launcher&quot;)
 }
 
@@ -516,7 +522,15 @@ spring.jpa.open-in-view=false
 spring.jpa.properties.hibernate.jdbc.fetch_size=100
 spring.sql.init.mode=never
 # Uncomment to see the SQL Hibernate sends:
-#logging.level.org.hibernate.SQL=debug</code></pre></div>
+#logging.level.org.hibernate.SQL=debug
+
+# --- REST API. No authentication yet: the server listens on this machine only, and every request names its user in the
+#     X-Acting-User-Id header (a stand-in until the security component exists). Errors are RFC 9457 ProblemDetail JSON.
+server.address=127.0.0.1
+server.port=${MAR_API_PORT:8080}
+spring.mvc.problemdetails.enabled=true
+springdoc.swagger-ui.path=/swagger-ui.html
+springdoc.api-docs.path=/v3/api-docs</code></pre></div>
 <div class="table-wrap"><table>
 <thead><tr><th scope="col">Environment variable</th><th scope="col">Default</th><th scope="col">Set it to</th></tr></thead>
 <tbody>
@@ -532,7 +546,9 @@ spring.sql.init.mode=never
 spring.main.banner-mode=off
 spring.main.log-startup-info=false
 logging.level.root=warn
-logging.level.com.masterantique=info</code></pre></div>
+logging.level.com.masterantique=info
+# The demo is a console run: no web server, so the process ends when the walk-through does.
+spring.main.web-application-type=none</code></pre></div>
 <div class="callout warn"><p><strong>Keep <code>ddl-auto=validate</code>.</strong> The schema was migrated and verified; Hibernate must only check it. <code>update</code> or <code>create</code> would change or drop the migrated tables. If validation fails, fix the entity, never the setting.</p></div>
 
 <h3 id="entities">Entities</h3>
@@ -609,8 +625,74 @@ public class AppUser {
     @Column(name = &quot;must_reset_password&quot;, nullable = false)
     private boolean mustResetPassword;                    // true for every migrated user
 
+    /** Longest username the column holds ({@code VARCHAR2(256 CHAR)}). */
+    public static final int MAX_NAME_CHARACTERS = 256;
+
     protected AppUser() {
     }
+
+    /**
+     * A new active user of the given kind, created now, with no password and {@code must_reset_password} TRUE (passwords
+     * belong to the security component). The username is trimmed and required, at most 256 characters
+     * ({@link IllegalArgumentException} otherwise); uniqueness among active users is the caller&#x27;s check
+     * ({@code AppUserRepository.existsActiveByName}) and the database&#x27;s (ix_users_name_active). The caller also adds
+     * the matching {@code user_roles} row.
+     */
+    public static AppUser create(String name, UserKind kind, LocalDateTime now) {
+        if (kind == null || now == null) {
+            throw new IllegalArgumentException(&quot;A new user needs a kind and a creation time.&quot;);
+        }
+        AppUser user = new AppUser();
+        user.name = validName(name);
+        user.discriminator = kind.name();
+        user.createdAt = now;
+        user.mustResetPassword = true;
+        return user;
+    }
+
+    /** Returns the username trimmed, or throws {@link IllegalArgumentException} if it is blank or too long. */
+    public static String validName(String raw) {
+        String name = raw == null ? &quot;&quot; : raw.strip();
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException(&quot;Username is required.&quot;);
+        }
+        if (name.codePointCount(0, name.length()) &gt; MAX_NAME_CHARACTERS) {
+            throw new IllegalArgumentException(&quot;Username must be at most 256 characters.&quot;);
+        }
+        return name;
+    }
+
+    /**
+     * Changes the username (trimmed, required, at most 256 characters: {@link IllegalArgumentException}). A
+     * soft-deleted user cannot be renamed ({@link IllegalStateException}). Uniqueness among the other active users is
+     * the caller&#x27;s check ({@code AppUserRepository.existsActiveByNameAndIdNot}).
+     */
+    public void rename(String newName) {
+        String name = validName(newName);
+        if (isDeleted()) {
+            throw new IllegalStateException(&quot;That user no longer exists.&quot;);
+        }
+        this.name = name;
+    }
+
+    /**
+     * Soft delete: sets {@code deleted_at}; tickets, comments and audit rows stay, and the username becomes free
+     * (the unique index covers active users only). Deleting an already deleted user throws {@link IllegalStateException}.
+     */
+    public void softDelete(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException(&quot;A deletion needs a time.&quot;);
+        }
+        if (isDeleted()) {
+            throw new IllegalStateException(&quot;That user no longer exists.&quot;);
+        }
+        this.deletedAt = now;
+    }
+
+    public boolean isDeleted() { return deletedAt != null; }
+
+    /** True if the discriminator says this user is of {@code kind}. */
+    public boolean isKind(UserKind kind) { return kind != null &amp;&amp; kind.name().equals(discriminator); }
 
     public Integer getId() { return id; }
     public String getName() { return name; }
@@ -652,7 +734,13 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
+/**
+ * One row of {@code tickets}. The legacy workflow: SUBMITTED ({@link #submit}) -&gt; INPROGRESS ({@link #take}) -&gt;
+ * COMPLETED ({@link #complete}); no edit, delete, reassignment or reopening. Invalid input throws
+ * {@link IllegalArgumentException}; a transition from the wrong state throws {@link IllegalStateException}.
+ */
 @Entity
 @Table(name = &quot;tickets&quot;)
 public class Ticket {
@@ -688,6 +776,82 @@ public class Ticket {
     protected Ticket() {
     }
 
+    /**
+     * A new SUBMITTED ticket for an active customer, submitted {@code now}. The description follows
+     * {@link TextRules#validText} (trimmed, required, at most 2,000 characters and 4,000 UTF-8 bytes, no control
+     * characters other than CR/LF/TAB) and is stored trimmed; {@link IllegalArgumentException} otherwise, also when
+     * {@code customer} is not an active Customer.
+     */
+    public static Ticket submit(AppUser customer, String description, LocalDateTime now) {
+        requireActive(customer, UserKind.Customer);
+        if (now == null) {
+            throw new IllegalArgumentException(&quot;A ticket needs a submission time.&quot;);
+        }
+        Ticket ticket = new Ticket();
+        ticket.description = TextRules.validText(description, &quot;Description&quot;);
+        ticket.customer = customer;
+        ticket.state = TicketState.SUBMITTED;
+        ticket.submittedDate = now;
+        return ticket;
+    }
+
+    /**
+     * &quot;Assign to Me&quot;: the employee takes this unassigned ticket; it becomes INPROGRESS, assigned {@code now}.
+     * {@link IllegalStateException} if it already has an assignee or is not SUBMITTED (&quot;already taken&quot;, a 409);
+     * {@link IllegalArgumentException} if {@code employee} is not an active Employee.
+     */
+    public void take(AppUser employee, LocalDateTime now) {
+        requireActive(employee, UserKind.Employee);
+        if (now == null) {
+            throw new IllegalArgumentException(&quot;Taking a ticket needs a time.&quot;);
+        }
+        if (assignee != null || state != TicketState.SUBMITTED) {
+            throw new IllegalStateException(&quot;This ticket has already been taken.&quot;);
+        }
+        this.assignee = employee;
+        this.state = TicketState.INPROGRESS;
+        this.assignedDate = now;
+    }
+
+    /**
+     * The assigned employee completes the ticket; it becomes COMPLETED, completed {@code now}.
+     * {@link IllegalStateException} if it is not assigned to {@code employee} (callers should find the ticket with
+     * {@code TicketRepository.findByIdAndAssignee_Id} first and answer 404) or is already COMPLETED (409; the legacy
+     * app re-completed it and moved the date). {@link IllegalArgumentException} if {@code employee} is not an active
+     * Employee. An optional completion comment is the caller&#x27;s: validate it with {@link Comment#validText} before
+     * calling this, then add it with {@link Comment#add}.
+     */
+    public void complete(AppUser employee, LocalDateTime now) {
+        requireActive(employee, UserKind.Employee);
+        if (now == null) {
+            throw new IllegalArgumentException(&quot;Completing a ticket needs a time.&quot;);
+        }
+        if (!isAssignedTo(employee.getId())) {
+            throw new IllegalStateException(&quot;This ticket is not assigned to you.&quot;);
+        }
+        if (state == TicketState.COMPLETED) {
+            throw new IllegalStateException(&quot;This ticket is already completed.&quot;);
+        }
+        this.state = TicketState.COMPLETED;
+        this.completedDate = now;
+    }
+
+    /** True if the ticket is assigned to the user with this id (compares ids; safe on lazy proxies). */
+    public boolean isAssignedTo(Integer userId) {
+        return userId != null &amp;&amp; assignee != null &amp;&amp; Objects.equals(assignee.getId(), userId);
+    }
+
+    /** True if the ticket belongs to the customer with this id. */
+    public boolean isOwnedBy(Integer customerId) {
+        return customerId != null &amp;&amp; customer != null &amp;&amp; Objects.equals(customer.getId(), customerId);
+    }
+
+    private static void requireActive(AppUser user, UserKind kind) {
+        if (user == null || !user.isKind(kind) || user.isDeleted()) {
+            throw new IllegalArgumentException(&quot;An active &quot; + kind.name().toLowerCase() + &quot; is required.&quot;);
+        }
+    }
+
     public Integer getId() { return id; }
     public TicketState getState() { return state; }
     public String getDescription() { return description; }
@@ -710,6 +874,9 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
+/**
+ * One row of {@code comments}. Add-only, as in the legacy app (no edit or delete). Created only by {@link #add}.
+ */
 @Entity
 @Table(name = &quot;comments&quot;)
 public class Comment {
@@ -735,6 +902,43 @@ public class Comment {
     protected Comment() {
     }
 
+    /**
+     * A new comment by {@code author} on {@code ticket}, created {@code now}. The ticket must be COMPLETED
+     * ({@link IllegalStateException}: &quot;Comments can only be added to completed tickets.&quot;, a 409). The text follows
+     * {@link #validText} and is stored trimmed ({@link IllegalArgumentException}, a 400). Who may comment (the
+     * ticket&#x27;s customer, or its assigned employee; never a manager) is the caller&#x27;s check, with
+     * {@code TicketRepository.findByIdAndCustomer_Id} / {@code findByIdAndAssignee_Id} (404 otherwise); an author that
+     * is neither the ticket&#x27;s customer nor its assignee, or is soft-deleted, is refused here too
+     * ({@link IllegalArgumentException}).
+     */
+    public static Comment add(AppUser author, Ticket ticket, String text, LocalDateTime now) {
+        if (author == null || ticket == null || now == null) {
+            throw new IllegalArgumentException(&quot;A comment needs an author, a ticket and a time.&quot;);
+        }
+        if (author.isDeleted()
+                || !(ticket.isOwnedBy(author.getId()) || ticket.isAssignedTo(author.getId()))) {
+            throw new IllegalArgumentException(&quot;Only the ticket&#x27;s customer or its assigned employee can comment on it.&quot;);
+        }
+        if (ticket.getState() != TicketState.COMPLETED) {
+            throw new IllegalStateException(&quot;Comments can only be added to completed tickets.&quot;);
+        }
+        Comment comment = new Comment();
+        comment.text = validText(text);
+        comment.author = author;
+        comment.ticket = ticket;
+        comment.createdAt = now;
+        return comment;
+    }
+
+    /**
+     * The comment text rules ({@link TextRules#validText}: trimmed, required, at most 2,000 characters and 4,000 UTF-8
+     * bytes, no control characters other than CR/LF/TAB): returns the trimmed text or throws
+     * {@link IllegalArgumentException}. Use it to check a completion comment before completing the ticket.
+     */
+    public static String validText(String raw) {
+        return TextRules.validText(raw, &quot;Comment&quot;);
+    }
+
     public Integer getId() { return id; }
     public AppUser getAuthor() { return author; }
     public Ticket getTicket() { return ticket; }
@@ -745,13 +949,18 @@ public class Comment {
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
-/** Workflow audit trail: ids and timestamps only, never comment text or descriptions. */
+/**
+ * Workflow audit trail in the legacy format: timestamp, actor, action code, entity type code, entity id. It holds ids
+ * and timestamps only, never comment text or descriptions (there is no column for them). Rows are only ever added.
+ */
 @Entity
 @Table(name = &quot;audit_logs&quot;)
 public class AuditLog {
@@ -764,13 +973,15 @@ public class AuditLog {
     private LocalDateTime timestamp;
 
     @Column(name = &quot;user_id&quot;, nullable = false)
-    private Integer userId;
+    private Integer userId;                   // the actor
 
+    @Enumerated(EnumType.ORDINAL)             // NUMBER(10), legacy ActionType code 0-11
     @Column(name = &quot;action&quot;, nullable = false)
-    private Integer action;          // numeric code from the legacy application
+    private AuditAction action;
 
+    @Enumerated(EnumType.ORDINAL)             // NUMBER(10), legacy EntityKind code 0-2
     @Column(name = &quot;entity_type&quot;, nullable = false)
-    private Integer entityType;
+    private AuditEntityKind entityType;
 
     @Column(name = &quot;entity_id&quot;, nullable = false)
     private Integer entityId;
@@ -778,11 +989,26 @@ public class AuditLog {
     protected AuditLog() {
     }
 
+    /** A new audit row; all values are required ({@link IllegalArgumentException} otherwise). */
+    public static AuditLog record(Integer actorUserId, AuditAction action, AuditEntityKind entityType,
+                                  Integer entityId, LocalDateTime timestamp) {
+        if (actorUserId == null || action == null || entityType == null || entityId == null || timestamp == null) {
+            throw new IllegalArgumentException(&quot;An audit row needs an actor, an action, an entity type, an entity id and a timestamp.&quot;);
+        }
+        AuditLog row = new AuditLog();
+        row.userId = actorUserId;
+        row.action = action;
+        row.entityType = entityType;
+        row.entityId = entityId;
+        row.timestamp = timestamp;
+        return row;
+    }
+
     public Integer getId() { return id; }
     public LocalDateTime getTimestamp() { return timestamp; }
     public Integer getUserId() { return userId; }
-    public Integer getAction() { return action; }
-    public Integer getEntityType() { return entityType; }
+    public AuditAction getAction() { return action; }
+    public AuditEntityKind getEntityType() { return entityType; }
     public Integer getEntityId() { return entityId; }
 }</code></pre></div>
 
@@ -791,11 +1017,16 @@ public class AuditLog {
 <div class="code"><div class="code-head"><span>repo/AppUserRepository.java</span><button type="button">Copy</button></div><pre><code>package com.masterantique.repo;
 
 import com.masterantique.model.AppUser;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+/**
+ * Users of every kind (TPH table {@code users}); {@code discriminator} is &quot;Customer&quot;, &quot;Employee&quot; or &quot;Manager&quot;
+ * ({@code UserKind.name()}). Soft-deleted users have {@code deletedAt} set.
+ */
 public interface AppUserRepository extends JpaRepository&lt;AppUser, Integer&gt; {
 
     /**
@@ -807,6 +1038,29 @@ public interface AppUserRepository extends JpaRepository&lt;AppUser, Integer&gt;
     @Query(&quot;select u from AppUser u where (case when u.deletedAt is null then lower(u.name) end) = lower(:name)&quot;)
     Optional&lt;AppUser&gt; findActiveByName(@Param(&quot;name&quot;) String name);
 
+    /** Is the username taken by an active user (ignoring case)? Same index expression as {@link #findActiveByName}. */
+    @Query(&quot;select count(u) &gt; 0 from AppUser u where (case when u.deletedAt is null then lower(u.name) end) = lower(:name)&quot;)
+    boolean existsActiveByName(@Param(&quot;name&quot;) String name);
+
+    /** As {@link #existsActiveByName}, ignoring the user being renamed. */
+    @Query(&quot;select count(u) &gt; 0 from AppUser u where (case when u.deletedAt is null then lower(u.name) end) = lower(:name)&quot;
+            + &quot; and u.id &lt;&gt; :id&quot;)
+    boolean existsActiveByNameAndIdNot(@Param(&quot;name&quot;) String name, @Param(&quot;id&quot;) Integer id);
+
+    /** An active (not soft-deleted) user by id: the acting user of a request. */
+    Optional&lt;AppUser&gt; findByIdAndDeletedAtIsNull(Integer id);
+
+    /** A user of one kind by id, soft-deleted ones included (edit, delete and look-up actions). */
+    Optional&lt;AppUser&gt; findByIdAndDiscriminator(Integer id, String discriminator);
+
+    /** Active users of one kind by username, ignoring case (actions 15, 19; the employees of metrics, 25). */
+    @Query(&quot;select u from AppUser u where u.discriminator = :discriminator and u.deletedAt is null&quot;
+            + &quot; order by lower(u.name), u.id&quot;)
+    List&lt;AppUser&gt; findActiveByDiscriminatorOrderByName(@Param(&quot;discriminator&quot;) String discriminator);
+
+    /** All users of one kind by id, soft-deleted ones included (pickers of actions 27, 28). */
+    List&lt;AppUser&gt; findByDiscriminatorOrderByIdAsc(String discriminator);
+
     long countByDiscriminator(String discriminator);
 
     long countByMustResetPasswordTrue();
@@ -815,25 +1069,119 @@ public interface AppUserRepository extends JpaRepository&lt;AppUser, Integer&gt;
 
 import com.masterantique.model.Ticket;
 import com.masterantique.model.TicketState;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+/** Tickets; {@code assignee} is the assigned employee (column user_id), {@code customer} the owner. */
 public interface TicketRepository extends JpaRepository&lt;Ticket, Integer&gt; {
 
     long countByState(TicketState state);
+
+    /** A customer&#x27;s tickets, newest first (actions 6, 27). */
+    List&lt;Ticket&gt; findByCustomer_IdOrderByIdDesc(Integer customerId);
+
+    /** Tickets with no assignee, by id, with their customer loaded (actions 9, 24). */
+    @EntityGraph(attributePaths = &quot;customer&quot;)
+    List&lt;Ticket&gt; findByAssigneeIsNullOrderByIdAsc();
+
+    /** Tickets assigned to an employee, by id (actions 10, 23, 28). */
+    List&lt;Ticket&gt; findByAssignee_IdOrderByIdAsc(Integer employeeId);
+
+    /** Every ticket by id (picker of action 26). */
+    List&lt;Ticket&gt; findAllByOrderByIdAsc();
+
+    /** One ticket with its customer and assignee loaded (detail of action 26). */
+    @EntityGraph(attributePaths = {&quot;customer&quot;, &quot;assignee&quot;})
+    Optional&lt;Ticket&gt; findWithPeopleById(Integer id);
+
+    /** The ticket if it belongs to this customer (action 7); empty means 404. */
+    Optional&lt;Ticket&gt; findByIdAndCustomer_Id(Integer id, Integer customerId);
+
+    /** The ticket if it is assigned to this employee (actions 12, 13); empty means 404. */
+    Optional&lt;Ticket&gt; findByIdAndAssignee_Id(Integer id, Integer employeeId);
+
+    /**
+     * Tickets whose description contains the text, ignoring case (SQL Server&#x27;s default collation ignored it in the
+     * legacy search), newest first, with the customer loaded (action 29). LIKE wildcards in the text are escaped.
+     */
+    @EntityGraph(attributePaths = &quot;customer&quot;)
+    List&lt;Ticket&gt; findByDescriptionContainingIgnoreCaseOrderBySubmittedDateDescIdDesc(String text);
+
+    // Metrics (action 25)
+
+    /** The first completion date, or null when no ticket is completed (&quot;nothing to show&quot;). */
+    @Query(&quot;select min(t.completedDate) from Ticket t where t.state = :state&quot;)
+    LocalDateTime findFirstCompletedDate(@Param(&quot;state&quot;) TicketState state);
+
+    /** Tickets completed in [from, to), with their assignee loaded. */
+    @EntityGraph(attributePaths = &quot;assignee&quot;)
+    List&lt;Ticket&gt; findByStateAndCompletedDateGreaterThanEqualAndCompletedDateLessThan(
+            TicketState state, LocalDateTime from, LocalDateTime to);
+
+    /** Tickets submitted in [from, to). */
+    List&lt;Ticket&gt; findBySubmittedDateGreaterThanEqualAndSubmittedDateLessThan(LocalDateTime from, LocalDateTime to);
 }</code></pre></div>
 <div class="code"><div class="code-head"><span>repo/CommentRepository.java</span><button type="button">Copy</button></div><pre><code>package com.masterantique.repo;
 
 import com.masterantique.model.Comment;
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+/**
+ * Comments (add-only). The author is loaded where the caller splits comments into employee and customer comments by
+ * the author&#x27;s discriminator.
+ */
 public interface CommentRepository extends JpaRepository&lt;Comment, Integer&gt; {
+
+    /** One ticket&#x27;s comments, oldest first, with their authors (actions 6, 10, 26). */
+    @EntityGraph(attributePaths = &quot;author&quot;)
+    List&lt;Comment&gt; findByTicket_IdOrderByCreatedAtAscIdAsc(Integer ticketId);
+
+    /** The comments of several tickets at once, oldest first, with authors (lists of 6 and 10 without N+1 queries). */
+    @EntityGraph(attributePaths = {&quot;author&quot;, &quot;ticket&quot;})
+    List&lt;Comment&gt; findByTicket_IdInOrderByCreatedAtAscIdAsc(Collection&lt;Integer&gt; ticketIds);
+
+    /** The ticket a comment belongs to (the &quot;ticket to open&quot; of a Comment audit row, action 14); empty if gone. */
+    @Query(&quot;select c.ticket.id from Comment c where c.id = :id&quot;)
+    Optional&lt;Integer&gt; findTicketIdById(@Param(&quot;id&quot;) Integer id);
+
+    /**
+     * Comments whose text contains the text, ignoring case (as the legacy SQL Server search), newest first, with
+     * author and ticket loaded (action 29). LIKE wildcards in the text are escaped.
+     */
+    @EntityGraph(attributePaths = {&quot;author&quot;, &quot;ticket&quot;})
+    List&lt;Comment&gt; findByTextContainingIgnoreCaseOrderByCreatedAtDescIdDesc(String text);
+
+    /** Comments created in [from, to), with authors and tickets (metrics, action 25). */
+    @EntityGraph(attributePaths = {&quot;author&quot;, &quot;ticket&quot;})
+    List&lt;Comment&gt; findByCreatedAtGreaterThanEqualAndCreatedAtLessThan(LocalDateTime from, LocalDateTime to);
 }</code></pre></div>
 <div class="code"><div class="code-head"><span>repo/AuditLogRepository.java</span><button type="button">Copy</button></div><pre><code>package com.masterantique.repo;
 
 import com.masterantique.model.AuditLog;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+/** The audit trail: read newest first (action 14); rows are only added, by the services. */
 public interface AuditLogRepository extends JpaRepository&lt;AuditLog, Integer&gt; {
+
+    /** All rows, newest first (timestamp, then id), one page. Pass an unsorted {@code PageRequest.of(page, size)}. */
+    Page&lt;AuditLog&gt; findAllByOrderByTimestampDescIdDesc(Pageable pageable);
+
+    /** Rows about one entity id (of any entity type, as the legacy filter), newest first, one page. */
+    Page&lt;AuditLog&gt; findByEntityIdOrderByTimestampDescIdDesc(Integer entityId, Pageable pageable);
 }</code></pre></div>
 
 <h3 id="check">Application and connection check</h3>

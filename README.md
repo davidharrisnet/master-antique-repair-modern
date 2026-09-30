@@ -4,127 +4,43 @@ Phase 2 of the MasterAntiqueRepair modernization: the legacy ASP.NET Web Forms r
 (`master-antique-repair`) rebuilt as a Spring Boot REST API with an Angular front end. The migration planning,
 data-migration tooling and reports live in the companion repository `claude_modernization`.
 
-**Status:** the Spring Boot back end is started. It connects to the migrated PostgreSQL database, maps its
-tables with JPA, and contains the sign-in logic for the first login of migrated users. There is no REST API,
-web security or front end yet. How it was built and how to run the demonstration:
-`claude_modernization/docs/phase2/model/postgresql/CLAUDE.md`.
+**Status:** the Spring Boot service in `model/oracle/` connects to the database migrated to **Oracle AI Database 26ai
+Free**, maps its tables with JPA, contains the sign-in logic for the first login of migrated users, and offers a REST
+API with a Swagger page for everything the old application let each kind of user do, except signing in. There is no
+web security or front end yet. The details are in [model/oracle/README.md](model/oracle/README.md).
+
+## Running the API
+
+Needs Java 21, Docker and the migrated database (container `mar-oracle`; if it does not exist, open
+`claude_modernization` and type `Run import-oracle`). Then:
+
+```
+cd model/oracle
+scripts/run-api.sh            # until Ctrl+C; or `start` / `stop` for the background
+```
+
+and open `http://127.0.0.1:8080/swagger-ui.html`. No password to type: the script keeps the database logins' passwords
+in a private file on your machine, `~/.config/mar/oracle.env`, outside every repository.
 
 ## Working with Claude Code
 
-Open this repository (or `claude_modernization`) in VS Code or a terminal with Claude Code and type:
-
-```
-Run model-postgresql
-```
-
-or, to rebuild the model code from scratch, `Rebuild the model.` Claude Code follows the model plan in the
-companion repository (`claude_modernization/docs/phase2/model/postgresql/CLAUDE.md`): it creates the database login and the
-local network route the model needs, runs the model's connection check, then the first-login password change.
-The first time, VS Code may ask for permission to read the `claude_modernization` folder; allow it.
-
-The model needs the migrated database (container `mar-postgres`). If it does not exist, open `claude_modernization`
-and type `Repeat iteration 5.` first. Guidance for Claude Code in this repository is in `CLAUDE.md`.
-
-**The Oracle proof of concept** has its own model, `model/oracle/`, on the Oracle database the migration also
-produced. Type `Run model-oracle` to run its demonstration; it follows
-`claude_modernization/docs/phase2/model/oracle/CLAUDE.md` and needs the container `mar-oracle` (`Run import-oracle` in
-`claude_modernization`). It is self-contained; see [model/oracle/README.md](model/oracle/README.md).
+Open this repository in VS Code or a terminal with Claude Code and type `Run model-oracle` (a demonstration on a
+temporary copy of the database: connection check and the first-login password change) or `Run import-controller`
+(build, unit tests and a smoke test of the API against `mar-oracle`). The first time, VS Code may ask for permission
+to read the `claude_modernization` folder; allow it. Guidance for Claude Code is in `CLAUDE.md`.
 
 ## Layout
 
 ```
-model/postgresql/   Spring Boot 4.1.1 service on PostgreSQL (Java 21, Gradle Kotlin DSL)
-model/oracle/       the same service on Oracle AI Database 26ai Free (the Oracle proof of concept; self-contained)
-frontend/             Angular app (not started)
-```
-
-```
-model/postgresql/src/main/java/com/masterantique/
-  ModelApplication.java   entry point
-  DatabaseCheck.java        logs what it is connected to at start-up
-  model/                    JPA entities: AppUser (users), Ticket, TicketState, Comment, AuditLog
-  repo/                     Spring Data repositories
-  login/                    LoginService, LoginResult, IdentityCheck, RejectingIdentityCheck
-  demo/                     DEMO ONLY, active with the "demo" profile: DemoIdentityCheck, FirstLoginDemo
-model/postgresql/src/test/java/...   LoginServiceTest (unit tests, no database)
-```
-
-## The database
-
-The back end uses the PostgreSQL database produced by the data migration (iteration 5 in `claude_modernization`):
-container `mar-postgres`, database `masterantique`, 8 tables, 155 rows, identifiers in snake_case. By design the
-container publishes no port and has no known owner password, so before the back end can connect you need, once:
-
-1. an application login `mar_app` with a password you choose, and
-2. a network route to the database (a container address, a shared Docker network, or a localhost-only proxy).
-
-Both are explained step by step, with every command tested, in
-`claude_modernization/docs/phase1/dbmigrate/iteration5/PostgreSQLDatabaseGuide.html`. The defaults here assume the
-localhost proxy on port 5433.
-
-## Configuration
-
-All connection settings come from environment variables; no password is ever written in the repository.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `MAR_DB_PASSWORD` | (none, required) | Password of the database login |
-| `MAR_DB_HOST` | `localhost` | Database host (`mar-postgres` when the back end runs in Docker on the shared network) |
-| `MAR_DB_PORT` | `5433` | Database port (`5432` for a container address or the shared network) |
-| `MAR_DB_USER` | `mar_app` | Database login |
-| `MAR_DB_NAME` | `masterantique` | Database name |
-
-Hibernate runs with `ddl-auto=validate`: it checks every entity against the migrated schema at start-up and never
-changes the schema. If validation fails, fix the entity, not the setting.
-
-## Build, test, run
-
-Needs Java 21. The Gradle wrapper downloads Gradle itself.
-
-```
-cd model/postgresql
-./gradlew build                      # compile and run the unit tests
-./gradlew test                       # unit tests only
-
-read -rsp 'mar_app password: ' MAR_DB_PASSWORD; echo; export MAR_DB_PASSWORD
-./gradlew bootRun                    # or: java -jar build/libs/model-postgresql-0.0.1-SNAPSHOT.jar
-```
-
-Start-up logs the connection and the data, for example:
-
-```
-Connected: mar_app @ masterantique, PostgreSQL 16.1 (Debian 16.1-1.pgdg120+1)
-users=12 tickets=24 comments=26 audit_logs=78
-customers=8 employees=3 managers=1, must reset password=12
-tickets SUBMITTED=8 INPROGRESS=8 COMPLETED=8
-```
-
-## First login of migrated users
-
-The migration carried no passwords over: every migrated user has no password hash and `must_reset_password = true`.
-`LoginService.login` therefore answers `MUST_CHANGE_PASSWORD` for them, and `changePassword` sets the first password
-(bcrypt hash, new security stamp, flag cleared) after an `IdentityCheck` confirms who the person is.
-
-- Without a profile, `RejectingIdentityCheck` is used: **no password can be changed** until a real identity check
-  exists (a single-use, expiring code issued by a manager, or a reset link sent to a verified email address).
-- The `demo` profile swaps in `DemoIdentityCheck` (accepts `DEMO-1234`) and a console walk-through. It changes the
-  stored password of the user you name, so use it only against a test copy of the database:
-
-```
-java -jar build/libs/model-postgresql-0.0.1-SNAPSHOT.jar --spring.profiles.active=demo \
-  --demo.username=Customer1 --demo.password=anything \
-  --demo.one-time-code=DEMO-1234 --demo.new-password=Walnut-Armoire-1887
+model/oracle/   Spring Boot 4.1.1 service on Oracle AI Database 26ai Free (Java 21, Gradle Kotlin DSL)
+frontend/       Angular app (not started)
 ```
 
 ## Next steps
 
-- REST API (Spring Web) with server-side validation, and Spring Security around `LoginService`.
+- Spring Security around `LoginService` (sign-up, sign-in, password resets, sign-out).
 - A real `IdentityCheck`, lockout on repeated failures (`access_failed_count`, `lockout_end_date_utc`), rate limiting.
-- Workflow audit logging with the same format as the legacy `audit_logs` (ids and timestamps, never comment text or
-  passwords), including password changes.
 - The Angular front end in `frontend/`.
-- The database is PostgreSQL (decided 2026-09-23). Oracle, named in the original brief, is a proof of concept only
-  (`model/oracle/`), not the application's database.
 
 ## License
 

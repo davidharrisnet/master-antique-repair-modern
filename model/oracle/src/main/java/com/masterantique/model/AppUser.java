@@ -70,8 +70,74 @@ public class AppUser {
     @Column(name = "must_reset_password", nullable = false)
     private boolean mustResetPassword;                    // true for every migrated user
 
+    /** Longest username the column holds ({@code VARCHAR2(256 CHAR)}). */
+    public static final int MAX_NAME_CHARACTERS = 256;
+
     protected AppUser() {
     }
+
+    /**
+     * A new active user of the given kind, created now, with no password and {@code must_reset_password} TRUE (passwords
+     * belong to the security component). The username is trimmed and required, at most 256 characters
+     * ({@link IllegalArgumentException} otherwise); uniqueness among active users is the caller's check
+     * ({@code AppUserRepository.existsActiveByName}) and the database's (ix_users_name_active). The caller also adds
+     * the matching {@code user_roles} row.
+     */
+    public static AppUser create(String name, UserKind kind, LocalDateTime now) {
+        if (kind == null || now == null) {
+            throw new IllegalArgumentException("A new user needs a kind and a creation time.");
+        }
+        AppUser user = new AppUser();
+        user.name = validName(name);
+        user.discriminator = kind.name();
+        user.createdAt = now;
+        user.mustResetPassword = true;
+        return user;
+    }
+
+    /** Returns the username trimmed, or throws {@link IllegalArgumentException} if it is blank or too long. */
+    public static String validName(String raw) {
+        String name = raw == null ? "" : raw.strip();
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("Username is required.");
+        }
+        if (name.codePointCount(0, name.length()) > MAX_NAME_CHARACTERS) {
+            throw new IllegalArgumentException("Username must be at most 256 characters.");
+        }
+        return name;
+    }
+
+    /**
+     * Changes the username (trimmed, required, at most 256 characters: {@link IllegalArgumentException}). A
+     * soft-deleted user cannot be renamed ({@link IllegalStateException}). Uniqueness among the other active users is
+     * the caller's check ({@code AppUserRepository.existsActiveByNameAndIdNot}).
+     */
+    public void rename(String newName) {
+        String name = validName(newName);
+        if (isDeleted()) {
+            throw new IllegalStateException("That user no longer exists.");
+        }
+        this.name = name;
+    }
+
+    /**
+     * Soft delete: sets {@code deleted_at}; tickets, comments and audit rows stay, and the username becomes free
+     * (the unique index covers active users only). Deleting an already deleted user throws {@link IllegalStateException}.
+     */
+    public void softDelete(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("A deletion needs a time.");
+        }
+        if (isDeleted()) {
+            throw new IllegalStateException("That user no longer exists.");
+        }
+        this.deletedAt = now;
+    }
+
+    public boolean isDeleted() { return deletedAt != null; }
+
+    /** True if the discriminator says this user is of {@code kind}. */
+    public boolean isKind(UserKind kind) { return kind != null && kind.name().equals(discriminator); }
 
     public Integer getId() { return id; }
     public String getName() { return name; }

@@ -1,7 +1,7 @@
 -- mar-roles.sql: application logins for the MasterAntiqueRepair database. Run once, as SYS in the container.
 -- The passwords arrive as the substitution variables app_pw and ro_pw, defined on standard input just before this script
 -- (see model/oracle/CLAUDE.md), never written in this file. SET VERIFY OFF keeps SQL*Plus from echoing them.
--- Tested copy of claude_modernization/tools/phase1/dbmigrate/import-oracle/guide/mar-roles.sql.
+-- Tested copy of claude_modernization/tools/phase2/dbmigrate/import-oracle/guide/mar-roles.sql.
 SET VERIFY OFF
 WHENEVER SQLERROR EXIT FAILURE
 ALTER SESSION SET CONTAINER = FREEPDB1;
